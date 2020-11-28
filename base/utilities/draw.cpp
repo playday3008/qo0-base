@@ -311,7 +311,7 @@ bool ImGui::ColorEdit4(const char* szLabel, Color* v, ImGuiColorEditFlags flags)
 
 	if (ImGui::ColorEdit4(szLabel, &vecColor.x, flags))
 	{
-		v->Set(vecColor.x, vecColor.y, vecColor.z, vecColor.w);
+		*v = Color(vecColor.x, vecColor.y, vecColor.z, vecColor.w);
 		return true;
 	}
 
@@ -463,13 +463,15 @@ void D::Setup(IDirect3DDevice9* pDevice, unsigned int uFontFlags)
 
 	ImFontConfig imIconsConfig;
 	imIconsConfig.RasterizerFlags = ImGuiFreeType::LightHinting;
-	const ImWchar wIconRanges[] = { 0xE000, 0xF000, 0 };
+	constexpr ImWchar wIconRanges[] =
+	{
+		0xE000, 0xF8FF, // Private Use Area
+		0
+	};
+
 	F::Icons = io.Fonts->AddFontFromMemoryCompressedTTF(qo0icons_compressed_data, qo0icons_compressed_size, 40.f, &imIconsConfig, wIconRanges);
 
-	if (ImGuiFreeType::BuildFontAtlas(io.Fonts, uFontFlags))
-		bInitialized = true;
-	else
-		bInitialized = false;
+	bInitialized = ImGuiFreeType::BuildFontAtlas(io.Fonts, uFontFlags);
 }
 
 void D::Destroy()
@@ -487,6 +489,10 @@ void D::Destroy()
 void D::RenderDrawData(ImDrawList* pDrawList)
 {
 	std::unique_lock<std::shared_mutex> lock(drawMutex);
+
+	// prevent render in main menu
+	if (!I::Engine->IsInGame())
+		return;
 
 	if (vecSafeDrawData.empty())
 		return;
@@ -550,11 +556,11 @@ void D::RenderDrawData(ImDrawList* pDrawList)
 			pDrawList->PushTextureID(data.pFont->ContainerAtlas->TexID);
 
 			if (data.iFlags & IMGUI_TEXT_DROPSHADOW)
-				pDrawList->AddText(data.pFont, data.flFontSize, ImVec2(data.vecFirst) + ImVec2(1.0f, -1.0f), data.colSecond, data.szText.data());
+				pDrawList->AddText(data.pFont, data.flFontSize, data.vecFirst + ImVec2(1.0f, -1.0f), data.colSecond, data.szText.data());
 			else if (data.iFlags & IMGUI_TEXT_OUTLINE)
 			{
-				pDrawList->AddText(data.pFont, data.flFontSize, ImVec2(data.vecFirst) + ImVec2(1.0f, -1.0f), data.colSecond, data.szText.data());
-				pDrawList->AddText(data.pFont, data.flFontSize, ImVec2(data.vecFirst) + ImVec2(-1.0f, 1.0f), data.colSecond, data.szText.data());
+				pDrawList->AddText(data.pFont, data.flFontSize, data.vecFirst + ImVec2(1.0f, -1.0f), data.colSecond, data.szText.data());
+				pDrawList->AddText(data.pFont, data.flFontSize, data.vecFirst + ImVec2(-1.0f, 1.0f), data.colSecond, data.szText.data());
 			}
 
 			pDrawList->AddText(data.pFont, data.flFontSize, data.vecFirst, data.colFirst, data.szText.data());

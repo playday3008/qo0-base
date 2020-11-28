@@ -90,9 +90,6 @@ bool H::Setup()
 	if (!DTR::RetrieveMessage.Create(MEM::GetVFunc(I::SteamGameCoordinator, VTABLE::RETRIEVEMESSAGE), &hkRetrieveMessage))
 		return false;
 
-	if (!DTR::EmitSound.Create(MEM::GetVFunc(I::EngineSound, VTABLE::EMITSOUND), &hkEmitSound))
-		return false;
-
 	if (!DTR::LockCursor.Create(MEM::GetVFunc(I::Surface, VTABLE::LOCKCURSOR), &hkLockCursor))
 		return false;
 
@@ -109,27 +106,26 @@ bool H::Setup()
 
 void H::Restore()
 {
-	DTR::Reset.~CDetourHook();
-	DTR::EndScene.~CDetourHook();
-	DTR::FrameStageNotify.~CDetourHook();
-	DTR::OverrideView.~CDetourHook();
-	DTR::OverrideMouseInput.~CDetourHook();
-	DTR::CreateMove.~CDetourHook();
-	DTR::SendNetMsg.~CDetourHook();
-	DTR::SendDatagram.~CDetourHook();
-	DTR::GetViewModelFOV.~CDetourHook();
-	DTR::DoPostScreenEffects.~CDetourHook();
-	DTR::IsConnected.~CDetourHook();
-	DTR::ListLeavesInBox.~CDetourHook();
-	DTR::PaintTraverse.~CDetourHook();
-	DTR::DrawModel.~CDetourHook();
-	DTR::RunCommand.~CDetourHook();
-	DTR::SendMessageGC.~CDetourHook();
-	DTR::RetrieveMessage.~CDetourHook();
-	DTR::EmitSound.~CDetourHook();
-	DTR::LockCursor.~CDetourHook();
-	DTR::PlaySoundSurface.~CDetourHook();
-	DTR::SvCheatsGetBool.~CDetourHook();
+	DTR::Reset.Remove();
+	DTR::EndScene.Remove();
+	DTR::FrameStageNotify.Remove();
+	DTR::OverrideView.Remove();
+	DTR::OverrideMouseInput.Remove();
+	DTR::CreateMove.Remove();
+	DTR::SendNetMsg.Remove();
+	DTR::SendDatagram.Remove();
+	DTR::GetViewModelFOV.Remove();
+	DTR::DoPostScreenEffects.Remove();
+	DTR::IsConnected.Remove();
+	DTR::ListLeavesInBox.Remove();
+	DTR::PaintTraverse.Remove();
+	DTR::DrawModel.Remove();
+	DTR::RunCommand.Remove();
+	DTR::SendMessageGC.Remove();
+	DTR::RetrieveMessage.Remove();
+	DTR::LockCursor.Remove();
+	DTR::PlaySoundSurface.Remove();
+	DTR::SvCheatsGetBool.Remove();
 
 	// @note: also should works but makes it undebuggable
 	#if 0
@@ -153,7 +149,7 @@ long D3DAPI H::hkReset(IDirect3DDevice9* pDevice, D3DPRESENT_PARAMETERS* pPresen
 	// invalidate vertex & index buffer, release fonts texture
 	ImGui_ImplDX9_InvalidateDeviceObjects();
 
-	HRESULT hReset = oReset(pDevice, pPresentationParameters);
+	const HRESULT hReset = oReset(pDevice, pPresentationParameters);
 
 	// get directx device and create fonts texture
 	if (hReset == D3D_OK)
@@ -174,7 +170,7 @@ long D3DAPI H::hkEndScene(IDirect3DDevice9* pDevice)
 		VirtualQuery(_ReturnAddress(), &memInfo, sizeof(MEMORY_BASIC_INFORMATION));
 
 		char chModuleName[MAX_PATH];
-		GetModuleFileName((HMODULE)memInfo.AllocationBase, chModuleName, MAX_PATH);
+		GetModuleFileName(static_cast<HMODULE>(memInfo.AllocationBase), chModuleName, MAX_PATH);
 
 		if (strstr(chModuleName, GAMEOVERLAYRENDERER_DLL) != nullptr)
 			pUsedAddress = _ReturnAddress();
@@ -248,7 +244,7 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 		return oCreateMove(thisptr, edx, flInputSampleTime, pCmd);
 
 	// netchannel pointer
-	INetChannel* pNetChannel = reinterpret_cast<INetChannel*>(I::ClientState->pNetChannel);
+	INetChannel* pNetChannel = I::ClientState->pNetChannel;
 
 	// get stack frame without asm inlines
 	// safe and will not break if you omitting frame pointer
@@ -264,6 +260,7 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 	// save previous view angles for movement correction
 	QAngle angOldViewPoint = pCmd->angViewPoint;
 
+	// @note: need do bunnyhop and other movements before prediction
 	CMiscellaneous::Get().Run(pCmd, pLocal, bSendPacket);
 
 	/*
@@ -274,7 +271,6 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 	if (I::ClientState->iDeltaTick > 0)
 		I::Prediction->Update(I::ClientState->iDeltaTick, I::ClientState->iDeltaTick > 0, I::ClientState->iLastCommandAck, I::ClientState->iLastOutgoingCommand + I::ClientState->nChokedCommands);
 
-	// @note: need do bunnyhop and other movements before prediction
 	CPrediction::Get().Start(pCmd, pLocal);
 	{
 		if (C::Get<bool>(Vars.bMiscAutoPistol))
@@ -300,7 +296,8 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 	}
 	CPrediction::Get().End(pCmd, pLocal);
 
-	CMiscellaneous::Get().MovementCorrection(pCmd, pLocal, angOldViewPoint);
+	if (pLocal->IsAlive())
+		CMiscellaneous::Get().MovementCorrection(pCmd, angOldViewPoint);
 
 	// clamp & normalize view angles
 	if (C::Get<bool>(Vars.bMiscAntiUntrusted))
@@ -308,15 +305,6 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 		pCmd->angViewPoint.Normalize();
 		pCmd->angViewPoint.Clamp();
 	}
-
-	// clear data from previous call
-	D::ClearDrawData();
-
-	// store data to render
-	CVisuals::Get().Store(pLocal);
-
-	// swap given data to safe container
-	D::SwapDrawData();
 
 	if (C::Get<bool>(Vars.bMiscPingSpike))
 		CLagCompensation::Get().UpdateIncomingSequences(pNetChannel);
@@ -327,10 +315,10 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 	if (pNetChannel != nullptr)
 	{
 		if (!DTR::SendNetMsg.IsHooked())
-			DTR::SendNetMsg.Create(MEM::GetVFunc(pNetChannel, VTABLE::SENDNETMSG), H::hkSendNetMsg);
+			DTR::SendNetMsg.Create(MEM::GetVFunc(pNetChannel, VTABLE::SENDNETMSG), &hkSendNetMsg);
 
 		if (!DTR::SendDatagram.IsHooked())
-			DTR::SendDatagram.Create(MEM::GetVFunc(pNetChannel, VTABLE::SENDDATAGRAM), H::hkSendDatagram);
+			DTR::SendDatagram.Create(MEM::GetVFunc(pNetChannel, VTABLE::SENDDATAGRAM), &hkSendDatagram);
 	}
 
 	// save next view angles state
@@ -347,12 +335,26 @@ bool FASTCALL H::hkCreateMove(IClientModeShared* thisptr, int edx, float flInput
 void FASTCALL H::hkPaintTraverse(ISurface* thisptr, int edx, unsigned int uPanel, bool bForceRepaint, bool bForce)
 {
 	static auto oPaintTraverse = DTR::PaintTraverse.GetOriginal<decltype(&hkPaintTraverse)>();
+	const FNV1A_t uPanelHash = FNV1A::Hash(I::Panel->GetName(uPanel));
 
 	// remove zoom panel
-	if (!I::Engine->IsTakingScreenshot() && C::Get<bool>(Vars.bWorld) && C::Get<std::vector<bool>>(Vars.vecWorldRemovals).at(REMOVAL_SCOPE) && !strcmp(I::Panel->GetName(uPanel), XorStr("HudZoom")))
+	if (!I::Engine->IsTakingScreenshot() && C::Get<bool>(Vars.bWorld) && C::Get<std::vector<bool>>(Vars.vecWorldRemovals).at(REMOVAL_SCOPE) && uPanelHash == FNV1A::HashConst("HudZoom"))
 		return;
 
 	oPaintTraverse(thisptr, edx, uPanel, bForceRepaint, bForce);
+
+	// @note: we don't render here, only store's data and render it later
+	if (uPanelHash == FNV1A::HashConst("FocusOverlayPanel"))
+	{
+		// clear data from previous call
+		D::ClearDrawData();
+
+		// store data to render
+		CVisuals::Get().Store();
+
+		// swap given data to safe container
+		D::SwapDrawData();
+	}
 }
 
 void FASTCALL H::hkPlaySound(ISurface* thisptr, int edx, const char* szFileName)
@@ -468,7 +470,7 @@ void FASTCALL H::hkFrameStageNotify(IBaseClientDll* thisptr, int edx, EClientFra
 		{
 			static bool bThirdPerson = false;
 
-			if (!I::Engine->IsConsoleVisible() && !W::bMainOpened && IPT::IsKeyReleased(C::Get<int>(Vars.iWorldThirdPersonKey)))
+			if (!I::Engine->IsConsoleVisible() && IPT::IsKeyReleased(C::Get<int>(Vars.iWorldThirdPersonKey)))
 				bThirdPerson = !bThirdPerson;
 
 			// my solution is here cuz camera offset is dynamically by standard functions without any garbage in overrideview hook
@@ -600,7 +602,7 @@ bool FASTCALL H::hkSendNetMsg(INetChannel* thisptr, int edx, INetMessage* pMessa
 	return oSendNetMsg(thisptr, edx, pMessage, bForceReliable, bVoice);
 }
 
-int FASTCALL H::hkSendDatagram(INetChannel* pNetChannel, int edx, bf_write* pDatagram)
+int FASTCALL H::hkSendDatagram(INetChannel* thisptr, int edx, bf_write* pDatagram)
 {
 	static auto oSendDatagram = DTR::SendDatagram.GetOriginal<decltype(&hkSendDatagram)>();
 
@@ -608,19 +610,19 @@ int FASTCALL H::hkSendDatagram(INetChannel* pNetChannel, int edx, bf_write* pDat
 	static CConVar* sv_maxunlag = I::ConVar->FindVar(XorStr("sv_maxunlag"));
 
 	if (!I::Engine->IsInGame() || !C::Get<bool>(Vars.bMiscPingSpike) || pDatagram != nullptr || pNetChannelInfo == nullptr || sv_maxunlag == nullptr)
-		return oSendDatagram(pNetChannel, edx, pDatagram);
+		return oSendDatagram(thisptr, edx, pDatagram);
 
-	int iInReliableStateOld = pNetChannel->iInReliableState;
-	int iInSequenceNrOld = pNetChannel->iInSequenceNr;
+	const int iInReliableStateOld = thisptr->iInReliableState;
+	const int iInSequenceNrOld = thisptr->iInSequenceNr;
 
 	// calculate max available fake latency with our real ping to keep it w/o real lags or delays
-	float flMaxLatency = std::max(0.f, std::clamp(C::Get<float>(Vars.flMiscLatencyFactor), 0.f, sv_maxunlag->GetFloat()) - pNetChannelInfo->GetLatency(FLOW_OUTGOING));
-	CLagCompensation::Get().AddLatencyToNetChannel(pNetChannel, flMaxLatency);
+	const float flMaxLatency = std::max(0.f, std::clamp(C::Get<float>(Vars.flMiscLatencyFactor), 0.f, sv_maxunlag->GetFloat()) - pNetChannelInfo->GetLatency(FLOW_OUTGOING));
+	CLagCompensation::Get().AddLatencyToNetChannel(thisptr, flMaxLatency);
 
-	int iReturn = oSendDatagram(pNetChannel, edx, pDatagram);
+	const int iReturn = oSendDatagram(thisptr, edx, pDatagram);
 
-	pNetChannel->iInReliableState = iInReliableStateOld;
-	pNetChannel->iInSequenceNr = iInSequenceNrOld;
+	thisptr->iInReliableState = iInReliableStateOld;
+	thisptr->iInSequenceNr = iInSequenceNrOld;
 
 	return iReturn;
 }
@@ -714,7 +716,7 @@ int FASTCALL H::hkSendMessage(ISteamGameCoordinator* thisptr, int edx, std::uint
 	std::uint32_t uMessageType = uMsgType & 0x7FFFFFFF;
 	void* pDataMutable = const_cast<void*>(pData);
 
-	int iStatus = oSendMessage(thisptr, edx, uMsgType, pDataMutable, uData);
+	const int iStatus = oSendMessage(thisptr, edx, uMsgType, pDataMutable, uData);
 
 	if (iStatus != EGCResultOK)
 		return iStatus;
@@ -731,7 +733,7 @@ int FASTCALL H::hkSendMessage(ISteamGameCoordinator* thisptr, int edx, std::uint
 int FASTCALL H::hkRetrieveMessage(ISteamGameCoordinator* thisptr, int edx, std::uint32_t* puMsgType, void* pDest, std::uint32_t uDest, std::uint32_t* puMsgSize)
 {
 	static auto oRetrieveMessage = DTR::RetrieveMessage.GetOriginal<decltype(&hkRetrieveMessage)>();
-	int iStatus = oRetrieveMessage(thisptr, edx, puMsgType, pDest, uDest, puMsgSize);
+	const int iStatus = oRetrieveMessage(thisptr, edx, puMsgType, pDest, uDest, puMsgSize);
 
 	if (iStatus != EGCResultOK)
 		return iStatus;
@@ -753,15 +755,6 @@ int FASTCALL H::hkRetrieveMessage(ISteamGameCoordinator* thisptr, int edx, std::
 	}
 
 	return iStatus;
-}
-
-void FASTCALL H::hkEmitSound(IEngineSound* thisptr, int edx, IRecipientFilter& filter, int nEntityIndex, int iChannel, const char* szSoundEntry, unsigned int uSoundEntryHash, const char* szSample, float flVolume, float flAttenuation, int nSeed, int iFlags, int iPitch, const Vector* vecOrigin, const Vector* vecDirection, CUtlVector<Vector>* pUtlVecOrigins, bool bUpdatePositions, int flSoundTime, int nSpeakerEntity, StartSoundParams_t& parameters)
-{
-	static auto oEmitSound = DTR::EmitSound.GetOriginal<decltype(&hkEmitSound)>();
-
-	// @note: for sound esp use: "player/footsteps", "player/land", "clipout" sounds check
-
-	oEmitSound(thisptr, edx, filter, nEntityIndex, iChannel, szSoundEntry, uSoundEntryHash, szSample, flVolume, flAttenuation, nSeed, iFlags, iPitch, vecOrigin, vecDirection, pUtlVecOrigins, bUpdatePositions, flSoundTime, nSpeakerEntity, parameters);
 }
 
 bool FASTCALL H::hkSvCheatsGetBool(CConVar* thisptr, int edx)
@@ -821,7 +814,7 @@ void P::Restore()
 	// @note: as example
 	#if 0
 	// restore smoke effect
-	RVP::SmokeEffectTickBegin->~CRecvPropHook();
+	RVP::SmokeEffectTickBegin->Restore();
 	#endif
 }
 #pragma endregion

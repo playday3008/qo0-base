@@ -1,7 +1,4 @@
 #pragma once
-// used: std::runtime_error
-#include <stdexcept>
-
 // used: winapi includes, call vfunc
 #include "../../common.h"
 
@@ -118,7 +115,7 @@ public:
 			return;
 
 		*reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(pKey) + 0xC) = iValue;
-		*reinterpret_cast<char*>(reinterpret_cast<std::uintptr_t>(pKey) + 0x10) = 2;
+		*reinterpret_cast<char*>(reinterpret_cast<std::uintptr_t>(pKey) + 0x10) = TYPE_INT;
 	}
 
 	inline void SetBool(const char* szKeyName, bool bValue)

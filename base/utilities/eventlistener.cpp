@@ -8,7 +8,7 @@
 #include "../features/visuals.h"
 #include "../features/misc.h"
 
-void CEventListener::Setup(std::deque<const char*> arrEvents)
+void CEventListener::Setup(const std::deque<const char*>& arrEvents)
 {
 	if (arrEvents.empty())
 		return;
@@ -29,6 +29,9 @@ void CEventListener::Destroy()
 
 void CEventListener::FireGameEvent(IGameEvent* pEvent)
 {
+	if (pEvent == nullptr)
+		return;
+
 	// get hash of event name
 	const FNV1A_t uNameHash = FNV1A::Hash(pEvent->GetName());
 

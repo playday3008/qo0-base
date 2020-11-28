@@ -44,8 +44,8 @@ bool I::Setup()
 	if (SteamUser == nullptr)
 		return false;
 
-	const HSteamUser hSteamUser = ((std::add_pointer_t<HSteamUser(void)>)GetProcAddress(GetModuleHandle(STEAM_API_DLL), XorStr("SteamAPI_GetHSteamUser")))();
-	const HSteamPipe hSteamPipe = ((std::add_pointer_t<HSteamPipe(void)>)GetProcAddress(GetModuleHandle(STEAM_API_DLL), XorStr("SteamAPI_GetHSteamPipe")))();
+	const HSteamUser hSteamUser = reinterpret_cast<std::add_pointer_t<HSteamUser()>>(GetProcAddress(GetModuleHandle(STEAM_API_DLL), XorStr("SteamAPI_GetHSteamUser")))();
+	const HSteamPipe hSteamPipe = reinterpret_cast<std::add_pointer_t<HSteamPipe()>>(GetProcAddress(GetModuleHandle(STEAM_API_DLL), XorStr("SteamAPI_GetHSteamPipe")))();
 
 	SteamGameCoordinator = static_cast<ISteamGameCoordinator*>(I::SteamClient->GetISteamGenericInterface(hSteamUser, hSteamPipe, XorStr("SteamGameCoordinator001")));
 	if (SteamGameCoordinator == nullptr)
@@ -67,7 +67,7 @@ bool I::Setup()
 	if (DirectDevice == nullptr)
 		return false;
 
-	ViewRenderBeams = *reinterpret_cast<IViewRenderBeams**>(MEM::FindPattern(CLIENT_DLL, XorStr("B9 ? ? ? ? A1 ? ? ? ? FF 10 A1 ? ? ? ? B9")) + 0x1);
+	ViewRenderBeams = *reinterpret_cast<IViewRenderBeams**>(MEM::FindPattern(CLIENT_DLL, XorStr("B9 ? ? ? ? A1 ? ? ? ? FF 10 A1 ? ? ? ? B9")) + 0x1); // @xref: "r_drawbrushmodels"
 	if (ViewRenderBeams == nullptr)
 		return false;
 
@@ -75,7 +75,7 @@ bool I::Setup()
 	if (Input == nullptr)
 		return false;
 
-	ClientState = **reinterpret_cast<IBaseClientState***>(MEM::FindPattern(ENGINE_DLL, XorStr("A1 ? ? ? ? 8B 80 ? ? ? ? C3")) + 0x1);
+	ClientState = **reinterpret_cast<IClientState***>(MEM::FindPattern(ENGINE_DLL, XorStr("A1 ? ? ? ? 8B 88 ? ? ? ? 85 C9 75 07")) + 0x1);
 	if (ClientState == nullptr)
 		return false;
 
@@ -129,7 +129,7 @@ T* I::Capture(const char* szModule, std::string_view szInterface)
 	}
 
 	#ifdef DEBUG_CONSOLE
-	L::PushConsoleColor(FOREGROUND_INTENSE_RED);
+	L::PushConsoleColor(FOREGROUND_RED);
 	L::Print(fmt::format(XorStr("[error] failed to find interface \"{}\" in \"{}\""), szInterface, szModule));
 	L::PopConsoleColor();
 	#endif

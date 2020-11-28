@@ -12,9 +12,9 @@ std::uintptr_t MEM::FindPattern(const char* szModuleName, const char* szPattern)
 	if (hModule == nullptr)
 		throw std::runtime_error(fmt::format(XorStr("failed to get handle for: {}"), szModuleName));
 
-	auto uModuleAdress = reinterpret_cast<std::uint8_t*>(hModule);
-	auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(hModule);
-	auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(uModuleAdress + pDosHeader->e_lfanew);
+	const auto uModuleAdress = reinterpret_cast<std::uint8_t*>(hModule);
+	const auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(hModule);
+	const auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(uModuleAdress + pDosHeader->e_lfanew);
 	const std::uintptr_t uOffset = FindPattern(uModuleAdress, pNtHeaders->OptionalHeader.SizeOfImage, szPattern);
 
 	if (!uOffset)
@@ -217,7 +217,7 @@ std::vector<int> MEM::PatternToBytes(const char* szPattern)
 
 std::string MEM::BytesToPattern(std::uint8_t* arrBytes, std::size_t uSize)
 {
-	std::stringstream ssPattern = { };
+	std::stringstream ssPattern;
 	ssPattern << std::hex << std::setfill('0');
 
 	for (std::size_t i = 0U; i < uSize; i++)

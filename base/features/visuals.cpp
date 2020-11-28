@@ -8,8 +8,6 @@
 #include "../sdk/datatypes/keyvalues.h"
 // used: cheat variables
 #include "../core/variables.h"
-// used: main window open state
-#include "../core/menu.h"
 // used: drawmodelexecute original for chams
 #include "../core/hooks.h"
 // used: render functions
@@ -20,21 +18,27 @@
 #include "../utilities.h"
 
 // @note: avoid store imcolor, store either u32 of imvec4
-void CVisuals::Store(CBaseEntity* pLocal)
+void CVisuals::Store()
 {
+	CBaseEntity* pLocal = CBaseEntity::GetLocalPlayer();
+
+	if (pLocal == nullptr)
+		return;
+
 	float flServerTime = TICKS_TO_TIME(pLocal->GetTickBase());
 
-	// disable post-proccesing
+	// disable post-processing
 	static CConVar* mat_postprocess_enable = I::ConVar->FindVar(XorStr("mat_postprocess_enable"));
 	mat_postprocess_enable->fnChangeCallbacks.Size() = NULL;
 	mat_postprocess_enable->SetValue(!(C::Get<bool>(Vars.bWorld) && C::Get<std::vector<bool>>(Vars.vecWorldRemovals).at(REMOVAL_POSTPROCESSING)));
 
-	// doesn't show when menu is opened
-	if (W::bMainOpened)
+	// check is render initialized
+	if (!D::bInitialized)
 		return;
 
 	const ImVec2 vecScreenSize = ImGui::GetIO().DisplaySize;
 
+	#pragma region visuals_store_world
 	// render scope lines
 	if (auto pWeapon = pLocal->GetWeapon(); pWeapon != nullptr && C::Get<bool>(Vars.bWorld) && C::Get<std::vector<bool>>(Vars.vecWorldRemovals).at(REMOVAL_SCOPE))
 	{
@@ -44,27 +48,30 @@ void CVisuals::Store(CBaseEntity* pLocal)
 		if (pWeaponData != nullptr && pWeaponData->nWeaponType == WEAPONTYPE_SNIPER && pLocal->IsScoped())
 		{
 			float flWidth = pWeapon->GetInaccuracy() * 300.f;
-			std::uint8_t uAlpha = std::min(255, static_cast<int>(255.f * pWeapon->GetInaccuracy()));
+			int iAlpha = std::min(255, static_cast<int>(255.f * pWeapon->GetInaccuracy()));
 
 			D::AddLine(ImVec2(0.f, vecScreenSize.y * 0.5f), ImVec2(vecScreenSize.x, vecScreenSize.y * 0.5f), Color(0, 0, 0, 200));
 			D::AddLine(ImVec2(vecScreenSize.x * 0.5f, 0.f), ImVec2(vecScreenSize.x * 0.5f, vecScreenSize.y), Color(0, 0, 0, 200));
 
 			// horizontal
-			D::AddRectMultiColor(ImVec2(0.f, vecScreenSize.y * 0.5f), ImVec2(vecScreenSize.x, vecScreenSize.y * 0.5f + flWidth), Color(0, 0, 0, uAlpha), Color(0, 0, 0, uAlpha), Color(0, 0, 0, 0), Color(0, 0, 0, 0));
-			D::AddRectMultiColor(ImVec2(0.f, vecScreenSize.y * 0.5f - flWidth), ImVec2(vecScreenSize.x, vecScreenSize.y * 0.5f), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, uAlpha), Color(0, 0, 0, uAlpha));
+			D::AddRectMultiColor(ImVec2(0.f, vecScreenSize.y * 0.5f), ImVec2(vecScreenSize.x, vecScreenSize.y * 0.5f + flWidth), Color(0, 0, 0, iAlpha), Color(0, 0, 0, iAlpha), Color(0, 0, 0, 0), Color(0, 0, 0, 0));
+			D::AddRectMultiColor(ImVec2(0.f, vecScreenSize.y * 0.5f - flWidth), ImVec2(vecScreenSize.x, vecScreenSize.y * 0.5f), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, iAlpha), Color(0, 0, 0, iAlpha));
 			// vertical
-			D::AddRectMultiColor(ImVec2(vecScreenSize.x * 0.5f, 0.f), ImVec2(vecScreenSize.x * 0.5f + flWidth, vecScreenSize.y), Color(0, 0, 0, uAlpha), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, uAlpha));
-			D::AddRectMultiColor(ImVec2(vecScreenSize.x * 0.5f - flWidth, 0.f), ImVec2(vecScreenSize.x * 0.5f, vecScreenSize.y), Color(0, 0, 0, 0), Color(0, 0, 0, uAlpha), Color(0, 0, 0, uAlpha), Color(0, 0, 0, 0));
+			D::AddRectMultiColor(ImVec2(vecScreenSize.x * 0.5f, 0.f), ImVec2(vecScreenSize.x * 0.5f + flWidth, vecScreenSize.y), Color(0, 0, 0, iAlpha), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, iAlpha));
+			D::AddRectMultiColor(ImVec2(vecScreenSize.x * 0.5f - flWidth, 0.f), ImVec2(vecScreenSize.x * 0.5f, vecScreenSize.y), Color(0, 0, 0, 0), Color(0, 0, 0, iAlpha), Color(0, 0, 0, iAlpha), Color(0, 0, 0, 0));
 		}
 	}
+	#pragma endregion
 
-	// on-screen
+	#pragma region visuals_store_screen
 	if (C::Get<bool>(Vars.bScreen))
 	{
 		if (C::Get<bool>(Vars.bScreenHitMarker))
 			HitMarker(vecScreenSize, flServerTime, C::Get<Color>(Vars.colScreenHitMarker), C::Get<Color>(Vars.colScreenHitMarkerDamage));
 	}
+	#pragma endregion
 
+	#pragma region visuals_store_esp
 	std::vector<std::pair<CBaseEntity*, float>> vecOrder = { };
 
 	for (int i = 1; i < I::ClientEntityList->GetMaxEntities(); i++)
@@ -74,10 +81,8 @@ void CVisuals::Store(CBaseEntity* pLocal)
 		if (pEntity == nullptr || pEntity->IsDormant())
 			continue;
 
-		const Vector vecOrigin = pEntity->GetOrigin();
-
 		// save entities and calculated distance for sort
-		vecOrder.emplace_back(std::make_pair(pEntity, (pLocal->GetOrigin() - vecOrigin).Length2D()));
+		vecOrder.emplace_back(std::make_pair(pEntity, (pEntity->GetRenderOrigin() - G::vecCamera).Length()));
 	}
 
 	// sort entities by distance to make closest entity drawn last to make it easy readable and look nicer
@@ -86,9 +91,8 @@ void CVisuals::Store(CBaseEntity* pLocal)
 			return a.second > b.second;
 		});
 
-	for (const auto& arrEntity : vecOrder)
+	for (const auto& [pEntity, flDistance] : vecOrder)
 	{
-		CBaseEntity* pEntity = arrEntity.first;
 		CBaseClient* pClientClass = pEntity->GetClientClass();
 
 		if (pClientClass == nullptr)
@@ -186,6 +190,7 @@ void CVisuals::Store(CBaseEntity* pLocal)
 				 *		full
 				 *		corner
 				 2	bars:
+				 *		flash
 				 *		health
 				 *		ammo
 				 3	texts:
@@ -200,7 +205,7 @@ void CVisuals::Store(CBaseEntity* pLocal)
 				 *		weapons
 				 *		distance
 				 */
-				Player(pLocal, pEntity, ctx, Color(255, 255, 255, 255), Color(20, 20, 20, 150), Color(0, 0, 0, 220));
+				Player(pLocal, pEntity, ctx, flDistance, Color(255, 255, 255, 255), Color(20, 20, 20, 150), Color(0, 0, 0, 220));
 			}
 
 			break;
@@ -267,18 +272,19 @@ void CVisuals::Store(CBaseEntity* pLocal)
 				if (!GetBoundingBox(pEntity, &ctx.box))
 					break;
 
-				DroppedWeapons(pWeapon, nDefinitionIndex, ctx, Color(255, 255, 255, 200), Color(80, 180, 200, 200), Color(40, 40, 40, 50), Color(0, 0, 0, 150));
+				DroppedWeapons(pWeapon, nDefinitionIndex, ctx, flDistance, Color(255, 255, 255, 200), Color(80, 180, 200, 200), Color(40, 40, 40, 50), Color(0, 0, 0, 150));
 			}
 
 			break;
 		}
 		}
 	}
+	#pragma endregion
 }
 
 void CVisuals::Event(IGameEvent* pEvent, const FNV1A_t uNameHash)
 {
-	if (pEvent == nullptr || !I::Engine->IsInGame())
+	if (!I::Engine->IsInGame())
 		return;
 
 	CBaseEntity* pLocal = CBaseEntity::GetLocalPlayer();
@@ -286,7 +292,7 @@ void CVisuals::Event(IGameEvent* pEvent, const FNV1A_t uNameHash)
 	if (pLocal == nullptr || !pLocal->IsAlive())
 		return;
 
-	float flServerTime = TICKS_TO_TIME(pLocal->GetTickBase());
+	const float flServerTime = TICKS_TO_TIME(pLocal->GetTickBase());
 
 	/* get hitmarker info */
 	if (C::Get<bool>(Vars.bScreen) && C::Get<bool>(Vars.bScreenHitMarker) && uNameHash == FNV1A::HashConst("player_hurt"))
@@ -329,47 +335,13 @@ bool CVisuals::Chams(CBaseEntity* pLocal, DrawModelResults_t* pResults, const Dr
 	if (pEntity == nullptr)
 		return false;
 
-	constexpr std::string_view szScrollProxies = R"#("texturescroll"
-	{
-		"texturescrollvar"		"$basetexturetransform"
-		"texturescrollrate"		"0.2"
-		"texturescrollangle"	"90"
-	})#";
-
-	/*
-	 * materials navigation:
-	 * [N]	[group]		[lit][proxy]
-	 *					[1/2] [1/2]
-	 *	0 - players		[+/-] [-/-]
-	 *	1 - viewmodel	[+/-] [-/-]
-	 *	2 - reflects	[+/+] [-/-]
-	 *	3 - custom		[+/+] [+/-]
-	 */
-	static std::array<std::pair<IMaterial*, IMaterial*>, 4U> arrMaterials =
-	{
-		std::make_pair(CreateMaterial(XorStr("qo0_players"), XorStr("VertexLitGeneric")),
-		CreateMaterial(XorStr("qo0_players_flat"), XorStr("UnlitGeneric"))),
-
-		std::make_pair(CreateMaterial(XorStr("qo0_viewmodel"), XorStr("VertexLitGeneric")),
-		CreateMaterial(XorStr("qo0_viewmodel_flat"), XorStr("UnlitGeneric"))),
-
-		std::make_pair(CreateMaterial(XorStr("qo0_reflective"), XorStr("VertexLitGeneric"), XorStr("vgui/white"), XorStr("env_cubemap")),
-		CreateMaterial(XorStr("qo0_glow"), XorStr("VertexLitGeneric"), XorStr("vgui/white"), XorStr("models/effects/cube_white"))),
-
-		std::make_pair(CreateMaterial(XorStr("qo0_scroll"), XorStr("VertexLitGeneric"), XorStr("dev/screenhighlight_pulse"), "", false, false, szScrollProxies),
-		I::MaterialSystem->FindMaterial(XorStr("models/inventory_items/hydra_crystal/hydra_crystal_detail"), TEXTURE_GROUP_OTHER))
-	};
-	
-	std::string_view szModelName = info.pStudioHdr->szName;
+	const std::string_view szModelName = info.pStudioHdr->szName;
 
 	// check for players
-	if (szModelName.find(XorStr("player")) != std::string_view::npos && szModelName.find(XorStr("shadow")) == std::string_view::npos && (C::Get<bool>(Vars.bEspChamsEnemies) || C::Get<bool>(Vars.bEspChamsAllies)))
+	if (pEntity->IsPlayer() && pEntity->IsAlive() && (C::Get<bool>(Vars.bEspChamsEnemies) || C::Get<bool>(Vars.bEspChamsAllies)))
 	{
 		// skip glow models
 		if (nFlags & (STUDIO_RENDER | STUDIO_SKIP_FLEXES | STUDIO_DONOTMODIFYSTENCILSTATE | STUDIO_NOLIGHTING_OR_CUBEMAP | STUDIO_SKIP_DECALS))
-			return false;
-
-		if (!pEntity->IsAlive())
 			return false;
 
 		// team filters check
@@ -399,25 +371,23 @@ bool CVisuals::Chams(CBaseEntity* pLocal, DrawModelResults_t* pResults, const Dr
 				return false;
 
 			// get colors
-			Color colVisible = pLocal->IsEnemy(pEntity) ? C::Get<Color>(Vars.colEspChamsEnemies) : C::Get<Color>(Vars.colEspChamsAllies);
-			Color colHidden = pLocal->IsEnemy(pEntity) ? C::Get<Color>(Vars.colEspChamsEnemiesWall) : C::Get<Color>(Vars.colEspChamsAlliesWall);
+			const Color colVisible = pLocal->IsEnemy(pEntity) ? C::Get<Color>(Vars.colEspChamsEnemies) : C::Get<Color>(Vars.colEspChamsAllies);
+			const Color colHidden = pLocal->IsEnemy(pEntity) ? C::Get<Color>(Vars.colEspChamsEnemiesWall) : C::Get<Color>(Vars.colEspChamsAlliesWall);
 
-			/* chams through walls */
+			// do chams through walls
 			if (C::Get<bool>(Vars.bEspChamsXQZ))
 			{
-				pMaterial->IncrementReferenceCount();
+				// set xqz color
+				I::StudioRender->SetColorModulation(colHidden.Base().data());
+
+				// set xqz alpha
+				I::StudioRender->SetAlphaModulation(colHidden.aBase());
 
 				// enable "$ignorez" flag and it enables ignore the z axis
 				pMaterial->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, true);
 
 				// set xqz wireframe
 				pMaterial->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, C::Get<int>(Vars.iEspChamsPlayer) == (int)EVisualsPlayersChams::WIREFRAME ? true : false);
-
-				// set xqz color
-				I::StudioRender->SetColorModulation(colHidden.Base().data());
-
-				// set xqz alpha
-				I::StudioRender->SetAlphaModulation(colHidden.aBase());
 
 				// override ignorez material
 				I::StudioRender->ForcedMaterialOverride(pMaterial);
@@ -426,20 +396,18 @@ bool CVisuals::Chams(CBaseEntity* pLocal, DrawModelResults_t* pResults, const Dr
 				oDrawModel(I::StudioRender, 0, pResults, info, pBoneToWorld, flFlexWeights, flFlexDelayedWeights, vecModelOrigin, nFlags);
 			}
 
-			/* visible chams */
-			pMaterial->IncrementReferenceCount();
+			// do visible chams
+			// set color
+			I::StudioRender->SetColorModulation(colVisible.Base().data());
+
+			// set alpha
+			I::StudioRender->SetAlphaModulation((pEntity == pLocal && pLocal->IsScoped() && I::Input->bCameraInThirdPerson) ? 0.3f : colVisible.aBase());
 
 			// disable "$ignorez" flag
 			pMaterial->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, false);
 
 			// set wireframe
 			pMaterial->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, C::Get<int>(Vars.iEspChamsPlayer) == (int)EVisualsPlayersChams::WIREFRAME ? true : false);
-
-			// set color
-			I::StudioRender->SetColorModulation(colVisible.Base().data());
-
-			// set alpha
-			I::StudioRender->SetAlphaModulation((pEntity == pLocal && pLocal->IsScoped() && I::Input->bCameraInThirdPerson) ? 0.3f : colVisible.aBase());
 
 			// override customized material
 			I::StudioRender->ForcedMaterialOverride(pMaterial);
@@ -516,10 +484,8 @@ bool CVisuals::Chams(CBaseEntity* pLocal, DrawModelResults_t* pResults, const Dr
 			return false;
 
 		// get color
-		Color colAdditional = C::Get<Color>(Vars.colEspChamsViewModelAdditional);
-		Color colViewModel = C::Get<Color>(Vars.colEspChamsViewModel);
-
-		pMaterial->IncrementReferenceCount();
+		const Color colAdditional = C::Get<Color>(Vars.colEspChamsViewModelAdditional);
+		const Color colViewModel = C::Get<Color>(Vars.colEspChamsViewModel);
 
 		// change material variables
 		if (C::Get<int>(Vars.iEspChamsViewModel) == (int)EVisualsViewModelChams::GLOW)
@@ -531,32 +497,49 @@ bool CVisuals::Chams(CBaseEntity* pLocal, DrawModelResults_t* pResults, const Dr
 			if (bEnvMapFresnelFound)
 				pEnvMapFresnel->SetInt(1);
 
-			static bool bTranslucentFound = false;
-			IMaterialVar* pTranslucent = pMaterial->FindVar(XorStr("$translucent"), &bTranslucentFound);
-
-			// add the materials colour values to the existing image
-			if (bTranslucentFound)
-				pTranslucent->SetInt(1);
-
 			static bool bFoundEnvMapTint = false;
 			IMaterialVar* pEnvMapTint = pMaterial->FindVar(XorStr("$envmaptint"), &bFoundEnvMapTint);
 
 			// set additional color
 			if (bFoundEnvMapTint)
 				pEnvMapTint->SetVector(colAdditional.rBase(), colAdditional.gBase(), colAdditional.bBase());
+
+			// set alpha
+			pMaterial->AlphaModulate(colAdditional.aBase());
+
+			// set color fusion for glow
+			pMaterial->SetMaterialVarFlag(MATERIAL_VAR_ADDITIVE, true);
+
+			// set "$ignorez" flag to 0 and disable it
+			pMaterial->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, false);
+
+			// set wireframe
+			pMaterial->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, C::Get<int>(Vars.iEspChamsViewModel) == (int)EVisualsViewModelChams::WIREFRAME ? true : false);
+
+			// override customized material
+			I::StudioRender->ForcedMaterialOverride(pMaterial);
+
+			// then draw original with our material
+			oDrawModel(I::StudioRender, 0, pResults, info, pBoneToWorld, flFlexWeights, flFlexDelayedWeights, vecModelOrigin, nFlags);
+
+			// clear overrides
+			I::StudioRender->ForcedMaterialOverride(nullptr);
 		}
-
-		// set wireframe
-		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, C::Get<int>(Vars.iEspChamsViewModel) == (int)EVisualsViewModelChams::WIREFRAME ? true : false);
-
-		// set "$ignorez" flag to 0 and disable it
-		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, false);
 
 		// set color
 		I::StudioRender->SetColorModulation(colViewModel.Base().data());
 
 		// set alpha
 		I::StudioRender->SetAlphaModulation(colViewModel.aBase());
+
+		// disable color fusion
+		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_ADDITIVE, false);
+
+		// set wireframe
+		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, C::Get<int>(Vars.iEspChamsViewModel) == (int)EVisualsViewModelChams::WIREFRAME ? true : false);
+
+		// set "$ignorez" flag to 0 and disable it
+		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, false);
 
 		// override customized material
 		I::StudioRender->ForcedMaterialOverride(pMaterial);
@@ -637,7 +620,7 @@ void CVisuals::Glow(CBaseEntity* pLocal)
 	}
 }
 
-bool CVisuals::GetBoundingBox(CBaseEntity* pEntity, Box_t* pBox)
+bool CVisuals::GetBoundingBox(CBaseEntity* pEntity, Box_t* pBox) const
 {
 	const ICollideable* pCollideable = pEntity->GetCollideable();
 
@@ -682,8 +665,8 @@ bool CVisuals::GetBoundingBox(CBaseEntity* pEntity, Box_t* pBox)
 
 	float flLeft = std::numeric_limits<float>::max();
 	float flTop = std::numeric_limits<float>::max();
-	float flRight = -std::numeric_limits<float>::max();
-	float flBottom = -std::numeric_limits<float>::max();
+	float flRight = std::numeric_limits<float>::lowest();
+	float flBottom = std::numeric_limits<float>::lowest();
 
 	// get screen points position
 	std::array<Vector2D, 8U> arrScreen = { };
@@ -720,7 +703,7 @@ bool CVisuals::GetBoundingBox(CBaseEntity* pEntity, Box_t* pBox)
 	return true;
 }
 
-IMaterial* CVisuals::CreateMaterial(std::string_view szName, std::string_view szShader, std::string_view szBaseTexture, std::string_view szEnvMap, bool bIgnorez, bool bWireframe, std::string_view szProxies)
+IMaterial* CVisuals::CreateMaterial(std::string_view szName, std::string_view szShader, std::string_view szBaseTexture, std::string_view szEnvMap, bool bIgnorez, bool bWireframe, std::string_view szProxies) const
 {
 	/*
 	 * @note: materials info:
@@ -732,7 +715,7 @@ IMaterial* CVisuals::CreateMaterial(std::string_view szName, std::string_view sz
 	 * use "mat_texture_list 1" command to see full materials list
 	 */
 
-	std::string szMaterial = fmt::format(XorStr(R"#("{shader}"
+	const std::string szMaterial = fmt::format(XorStr(R"#("{shader}"
 	{{
 		"$basetexture"		"{texture}"
 		"$envmap"			"{envmap}"
@@ -761,51 +744,57 @@ IMaterial* CVisuals::CreateMaterial(std::string_view szName, std::string_view sz
 
 void CVisuals::HitMarker(const ImVec2& vecScreenSize, float flServerTime, Color colLines, Color colDamage)
 {
-	float flAlpha = 0.f;
+	if (vecHitMarks.empty())
+		return;
 
+	// get last time delta for lines
+	const float flLastDelta = vecHitMarks.back().flTime - flServerTime;
+
+	if (flLastDelta <= 0.f)
+		return;
+
+	const float flMaxLinesAlpha = colLines.aBase();
+	constexpr int arrSides[4][2] = { { -1, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 } };
+	for (const auto& iSide : arrSides)
+	{
+		// set fade out alpha
+		colLines.arrColor.at(3) = static_cast<std::uint8_t>(std::min(flMaxLinesAlpha, flLastDelta / C::Get<float>(Vars.flScreenHitMarkerTime)) * 255.f);
+		// draw mark cross
+		D::AddLine(ImVec2(vecScreenSize.x * 0.5f + C::Get<int>(Vars.iScreenHitMarkerGap) * iSide[0], vecScreenSize.y * 0.5f + C::Get<int>(Vars.iScreenHitMarkerGap) * iSide[1]), ImVec2(vecScreenSize.x * 0.5f + C::Get<int>(Vars.iScreenHitMarkerLenght) * iSide[0], vecScreenSize.y * 0.5f + C::Get<int>(Vars.iScreenHitMarkerLenght) * iSide[1]), colLines);
+	}
+
+	if (!C::Get<bool>(Vars.bScreenHitMarkerDamage))
+		return;
+
+	const float flMaxDamageAlpha = colDamage.aBase();
 	for (std::size_t i = 0U; i < vecHitMarks.size(); i++)
 	{
-		float flDelta = vecHitMarks.at(i).flTime - flServerTime;
+		const float flDelta = vecHitMarks.at(i).flTime - flServerTime;
 
-		if (flDelta < 0.f)
+		if (flDelta <= 0.f)
 		{
 			vecHitMarks.erase(vecHitMarks.cbegin() + i);
 			continue;
 		}
 
-		if (!C::Get<bool>(Vars.bScreenHitMarkerDamage))
-			continue;
-
-		// max distance for floating damage
-		constexpr int iDistance = 40;
-
-		float flRatio = 1.f - (flDelta / C::Get<float>(Vars.flScreenHitMarkerTime));
-		flAlpha = flDelta / C::Get<float>(Vars.flScreenHitMarkerTime);
-
 		Vector2D vecScreen = { };
 		if (D::WorldToScreen(vecHitMarks.at(i).vecPosition, vecScreen))
 		{
-			// set fade out alpha
-			colDamage.arrColor.at(3) = static_cast<std::uint8_t>(std::min(colDamage.aBase(), flAlpha) * 255.f);
-			// draw dealt damage
-			D::AddText(F::SmallestPixel, 20.f, ImVec2(vecScreen.x, vecScreen.y - flRatio * iDistance), std::to_string(vecHitMarks.at(i).iDamage), colDamage, IMGUI_TEXT_OUTLINE);
-		}
-	}
+			// max distance for floating damage
+			constexpr float flDistance = 40.f;
+			const float flRatio = 1.0f - (flDelta / C::Get<float>(Vars.flScreenHitMarkerTime));
 
-	if (!vecHitMarks.empty())
-	{
-		constexpr int arrSides[4][2] = { { -1, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 } };
-		for (auto& iSide : arrSides)
-		{
 			// set fade out alpha
-			colLines.arrColor.at(3) = static_cast<std::uint8_t>(std::min(colLines.aBase(), flAlpha) * 255.f);
-			// draw mark cross
-			D::AddLine(ImVec2(vecScreenSize.x * 0.5f + C::Get<int>(Vars.iScreenHitMarkerGap) * iSide[0], vecScreenSize.y * 0.5f + C::Get<int>(Vars.iScreenHitMarkerGap) * iSide[1]), ImVec2(vecScreenSize.x * 0.5f + C::Get<int>(Vars.iScreenHitMarkerLenght) * iSide[0], vecScreenSize.y * 0.5f + C::Get<int>(Vars.iScreenHitMarkerLenght) * iSide[1]), colLines);
+			const int iAlpha = static_cast<int>(std::min(flMaxDamageAlpha, flDelta / C::Get<float>(Vars.flScreenHitMarkerTime)) * 255.f);
+			colDamage.arrColor.at(3) = static_cast<std::uint8_t>(iAlpha);
+
+			// draw dealt damage
+			D::AddText(F::SmallestPixel, 24.f, ImVec2(vecScreen.x, vecScreen.y - flRatio * flDistance), std::to_string(vecHitMarks.at(i).iDamage), colDamage, IMGUI_TEXT_OUTLINE, Color(0, 0, 0, iAlpha));
 		}
 	}
 }
 
-void CVisuals::NightMode(CEnvTonemapController* pController)
+void CVisuals::NightMode(CEnvTonemapController* pController) const
 {
 	static bool bSwitch = false;
 
@@ -822,7 +811,7 @@ void CVisuals::NightMode(CEnvTonemapController* pController)
 		bSwitch = (C::Get<bool>(Vars.bWorld) && C::Get<bool>(Vars.bWorldNightMode));
 }
 
-void CVisuals::Bomb(const Vector2D& vecScreen, Context_t& ctx, Color colFrame)
+void CVisuals::Bomb(const Vector2D& vecScreen, Context_t& ctx, const Color& colFrame)
 {
 	const char* szIcon = U::GetWeaponIcon(WEAPON_C4);
 	const ImVec2 vecIconSize = F::Icons->CalcTextSizeA(14.f, FLT_MAX, 0.f, szIcon);
@@ -843,7 +832,7 @@ void CVisuals::Bomb(const Vector2D& vecScreen, Context_t& ctx, Color colFrame)
 	D::AddText(F::Verdana, 14.f, ImVec2(ctx.box.left + vecIconSize.x + 7, ctx.box.top + 3), szName, Color(255, 255, 255));
 }
 
-void CVisuals::PlantedBomb(CPlantedC4* pBomb, float flServerTime, const Vector2D& vecScreen, Context_t& ctx, Color colFrame, Color colDefuse, Color colFailDefuse, Color colBackground, Color colOutline)
+void CVisuals::PlantedBomb(CPlantedC4* pBomb, float flServerTime, const Vector2D& vecScreen, Context_t& ctx, const Color& colFrame, const Color& colDefuse, const Color& colFailDefuse, const Color& colBackground, const Color& colOutline)
 {
 	const char* szIcon = U::GetWeaponIcon(WEAPON_C4);
 	static ImVec2 vecIconSize = F::Icons->CalcTextSizeA(14.f, FLT_MAX, 0.f, szIcon);
@@ -902,7 +891,7 @@ void CVisuals::PlantedBomb(CPlantedC4* pBomb, float flServerTime, const Vector2D
 	}
 }
 
-void CVisuals::Grenade(CBaseEntity* pGrenade, EClassIndex nIndex, float flServerTime, Vector2D vecScreen, Context_t& ctx, Color colFrame, Color colBackground, Color colOutline)
+void CVisuals::Grenade(CBaseEntity* pGrenade, EClassIndex nIndex, float flServerTime, const Vector2D& vecScreen, Context_t& ctx, const Color& colFrame, const Color& colBackground, const Color& colOutline)
 {
 	// setup temporary values
 	const char* szName = XorStr("NONE");
@@ -982,10 +971,8 @@ void CVisuals::Grenade(CBaseEntity* pGrenade, EClassIndex nIndex, float flServer
 	}
 }
 
-void CVisuals::DroppedWeapons(CBaseCombatWeapon* pWeapon, short nItemDefinitionIndex, Context_t& ctx, Color colPrimary, Color colAmmo, Color colBackground, Color colOutline)
+void CVisuals::DroppedWeapons(CBaseCombatWeapon* pWeapon, short nItemDefinitionIndex, Context_t& ctx, const float flDistance, const Color& colPrimary, const Color& colAmmo, const Color& colBackground, const Color& colOutline)
 {
-	const float flDistance = std::fabsf((pWeapon->GetRenderOrigin() - G::vecCamera).Length());
-
 	if (C::Get<int>(Vars.iEspMainWeaponBox) > (int)EVisualsBoxType::NONE)
 		Box(ctx.box, C::Get<int>(Vars.iEspMainWeaponBox), C::Get<Color>(Vars.colEspMainBoxWeapons), Color(0, 0, 0, 150));
 
@@ -1024,7 +1011,7 @@ void CVisuals::DroppedWeapons(CBaseCombatWeapon* pWeapon, short nItemDefinitionI
 	}
 }
 
-void CVisuals::Player(CBaseEntity* pLocal, CBaseEntity* pEntity, Context_t& ctx, Color colInfo, Color colFrame, Color colOutline)
+void CVisuals::Player(CBaseEntity* pLocal, CBaseEntity* pEntity, Context_t& ctx, const float flDistance, const Color& colInfo, const Color& colFrame, const Color& colOutline)
 {
 	PlayerInfo_t pInfo;
 	if (!I::Engine->GetPlayerInfo(pEntity->GetIndex(), &pInfo))
@@ -1033,7 +1020,7 @@ void CVisuals::Player(CBaseEntity* pLocal, CBaseEntity* pEntity, Context_t& ctx,
 	if (C::Get<int>(Vars.iEspMainPlayerBox) > (int)EVisualsBoxType::NONE)
 	{
 		// get box color based on visibility & enmity
-		Color colBox = pEntity->IsEnemy(pLocal) ?
+		const Color colBox = pEntity->IsEnemy(pLocal) ?
 			pLocal->IsVisible(pEntity, pEntity->GetBonePosition(BONE_HEAD).value_or(pEntity->GetEyePosition(false))) ? C::Get<Color>(Vars.colEspMainBoxEnemies) : C::Get<Color>(Vars.colEspMainBoxEnemiesWall) :
 			pLocal->IsVisible(pEntity, pEntity->GetBonePosition(BONE_HEAD).value_or(pEntity->GetEyePosition(false))) ? C::Get<Color>(Vars.colEspMainBoxAllies) : C::Get<Color>(Vars.colEspMainBoxAlliesWall);
 
@@ -1045,7 +1032,6 @@ void CVisuals::Player(CBaseEntity* pLocal, CBaseEntity* pEntity, Context_t& ctx,
 		return;
 
 	// @note: distance font scale
-	const float flDistance = std::fabsf((pEntity->GetRenderOrigin() - G::vecCamera).Length());
 	const float flFontSize = std::clamp(90.f / (flDistance / 90.f), 10.f, 40.f);
 
 	#pragma region visuals_player_top
@@ -1189,7 +1175,7 @@ void CVisuals::Player(CBaseEntity* pLocal, CBaseEntity* pEntity, Context_t& ctx,
 	#pragma endregion
 }
 
-void CVisuals::Box(const Box_t& box, const int nBoxType, Color colPrimary, Color colOutline)
+void CVisuals::Box(const Box_t& box, const int nBoxType, const Color& colPrimary, const Color& colOutline)
 {
 	switch (nBoxType)
 	{
@@ -1197,7 +1183,7 @@ void CVisuals::Box(const Box_t& box, const int nBoxType, Color colPrimary, Color
 	{
 		D::AddRect(ImVec2(box.left, box.top), ImVec2(box.right, box.bottom), colPrimary, IMGUI_RECT_OUTLINE | IMGUI_RECT_BORDER, colOutline);
 		break;
-	};
+	}
 	case (int)EVisualsBoxType::CORNERS:
 	{
 		// num of parts we divide the whole line
@@ -1226,13 +1212,13 @@ void CVisuals::Box(const Box_t& box, const int nBoxType, Color colPrimary, Color
 			D::AddLine(arrPoint.first, arrPoint.second, colPrimary);
 
 		break;
-	};
+	}
 	default:
 		break;
 	}
 }
 
-void CVisuals::HealthBar(Context_t& ctx, float flFactor, Color colPrimary, Color colBackground, Color colOutline)
+void CVisuals::HealthBar(Context_t& ctx, const float flFactor, const Color& colPrimary, const Color& colBackground, const Color& colOutline)
 {
 	// background
 	D::AddRect(ImVec2(ctx.box.left - 5 - ctx.arrPadding.at(DIR_LEFT), ctx.box.top), ImVec2(ctx.box.left - 3 - ctx.arrPadding.at(DIR_LEFT), ctx.box.bottom), colBackground, IMGUI_RECT_FILLED | IMGUI_RECT_OUTLINE, colOutline);
@@ -1241,7 +1227,7 @@ void CVisuals::HealthBar(Context_t& ctx, float flFactor, Color colPrimary, Color
 	ctx.arrPadding.at(DIR_LEFT) += 6.0f;
 }
 
-void CVisuals::AmmoBar(CBaseEntity* pEntity, CBaseCombatWeapon* pWeapon, Context_t& ctx, Color colPrimary, Color colBackground, Color colOutline)
+void CVisuals::AmmoBar(CBaseEntity* pEntity, CBaseCombatWeapon* pWeapon, Context_t& ctx, const Color& colPrimary, const Color& colBackground, const Color& colOutline)
 {
 	CCSWeaponData* pWeaponData = I::WeaponSystem->GetWeaponData(pWeapon->GetItemDefinitionIndex());
 
@@ -1256,9 +1242,6 @@ void CVisuals::AmmoBar(CBaseEntity* pEntity, CBaseCombatWeapon* pWeapon, Context
 	const int iAmmo = pWeapon->GetAmmo();
 	const int iMaxAmmo = pWeaponData->iMaxClip1;
 
-	// add modifiable width factor
-	float flFactor = 0.f;
-
 	CAnimationLayer* pLayer = nullptr;
 	int nActivity = 0;
 
@@ -1268,6 +1251,9 @@ void CVisuals::AmmoBar(CBaseEntity* pEntity, CBaseCombatWeapon* pWeapon, Context
 		pLayer = pEntity->GetAnimationLayer(1);
 		nActivity = pEntity->GetSequenceActivity(pLayer->nSequence);
 	}
+
+	// add modifiable width factor
+	float flFactor = 0.f;
 
 	// calculate ammo-based width factor
 		// check for reloading animation
@@ -1285,16 +1271,14 @@ void CVisuals::AmmoBar(CBaseEntity* pEntity, CBaseCombatWeapon* pWeapon, Context
 	ctx.arrPadding.at(DIR_BOTTOM) += 6.0f;
 }
 
-void CVisuals::FlashBar(CBaseEntity* pEntity, Context_t& ctx, Color colPrimary, Color colBackground, Color colOutline)
+void CVisuals::FlashBar(CBaseEntity* pEntity, Context_t& ctx, const Color& colPrimary, const Color& colBackground, const Color& colOutline)
 {
 	// calculate flash alpha-based width factor
-	float flFactor = pEntity->GetFlashAlpha() / *pEntity->GetFlashMaxAlpha();
+	const float flFactor = pEntity->GetFlashAlpha() / *pEntity->GetFlashMaxAlpha();
 
 	// background
-	D::AddRect(ImVec2(ctx.box.left, ctx.box.top - 3 - ctx.arrPadding.at(DIR_TOP)), ImVec2(ctx.box.right, ctx.box.top - 5 - ctx.arrPadding.at(DIR_TOP)), colBackground, IMGUI_RECT_FILLED);
+	D::AddRect(ImVec2(ctx.box.left, ctx.box.top - 5 - ctx.arrPadding.at(DIR_TOP)), ImVec2(ctx.box.right, ctx.box.top - 3 - ctx.arrPadding.at(DIR_TOP)), colBackground, IMGUI_RECT_FILLED | IMGUI_RECT_OUTLINE);
 	// bar
-	D::AddRect(ImVec2(ctx.box.left, ctx.box.top - 3 - ctx.arrPadding.at(DIR_TOP)), ImVec2(ctx.box.left + ctx.box.width * flFactor, ctx.box.top - 5 - ctx.arrPadding.at(DIR_TOP)), colPrimary, IMGUI_RECT_FILLED);
-	// outline
-	D::AddRect(ImVec2(ctx.box.left - 1, ctx.box.top - 3 - ctx.arrPadding.at(DIR_TOP)), ImVec2(ctx.box.right + 1, ctx.box.top - 5 - ctx.arrPadding.at(DIR_TOP)), colOutline); // hmm, why offset here like for bar or bg?
+	D::AddRect(ImVec2(ctx.box.left, ctx.box.top - 5 - ctx.arrPadding.at(DIR_TOP)), ImVec2(ctx.box.left + ctx.box.width * flFactor, ctx.box.top - 3 - ctx.arrPadding.at(DIR_TOP)), colPrimary, IMGUI_RECT_FILLED);
 	ctx.arrPadding.at(DIR_TOP) += 6.0f;
 }
