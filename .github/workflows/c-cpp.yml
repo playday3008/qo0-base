@@ -36,8 +36,7 @@ jobs:
       shell: bash
       
     - name: MSBuild
-      working-directory: base
-      run: msbuild cinnamon.vcxproj /p:Configuration=Release /v:m
+      run: msbuild base.sln /p:Configuration=Release /v:m
       env:
         DXSDK_DIR: ${{ github.workspace }}\DXSDK\
     - name: SHA1
